@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowui.dev/schemas/ui-model.schema.json",
+  "title": "FlowUI UI Model",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "page", "revision", "elements"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "revision": { "type": "string", "minLength": 1 },
+    "page": { "type": "object" },
+    "elements": { "type": "object" }
+  }
+}
