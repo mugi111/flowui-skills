@@ -1,0 +1,21 @@
+{
+  "name": "@company/flowui-skills",
+  "version": "0.1.0",
+  "description": "FlowUI Skills command-line interface.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "flowui": "./dist/index.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/index.test.js"
+  }
+}
