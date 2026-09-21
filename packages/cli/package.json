@@ -1,8 +1,8 @@
 {
-  "name": "@company/flowui-skills",
+  "name": "@mugi111/flowui-skills",
   "version": "0.1.0",
   "description": "FlowUI Skills command-line interface.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "flowui": "./dist/index.js"

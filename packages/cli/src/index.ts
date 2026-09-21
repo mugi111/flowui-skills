@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const packageName = "@company/flowui-skills";
+const packageName = "@mugi111/flowui-skills";
 const version = "0.1.0";
 
 const usage = `FlowUI Skills ${version}

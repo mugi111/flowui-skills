@@ -18,4 +18,4 @@ The `flowui` CLI currently provides its command surface only. Commands are imple
 
 ## License
 
-The package is currently marked `UNLICENSED` until the project owner chooses a distribution license.
+[MIT](LICENSE)

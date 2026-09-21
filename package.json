@@ -3,15 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "description": "Black-box UI exploration, scenario design, and browser automation skills.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "packageManager": "npm@11.6.2",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@company/flowui-skills",
-    "check": "npm run check --workspace=@company/flowui-skills",
-    "test": "npm run test --workspace=@company/flowui-skills"
+    "build": "npm run build --workspace=@mugi111/flowui-skills",
+    "check": "npm run check --workspace=@mugi111/flowui-skills",
+    "test": "npm run test --workspace=@mugi111/flowui-skills"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
