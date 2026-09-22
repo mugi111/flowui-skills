@@ -1,0 +1,2 @@
+export type BoundaryVariant="below-min"|"at-min"|"at-max"|"above-max";
+export function deriveNumberValue(rule:{min?:number;max?:number;step?:number},variant:BoundaryVariant):number|undefined{const step=rule.step??1;if(step<=0)return undefined;if(variant==="below-min")return rule.min===undefined?undefined:rule.min-step;if(variant==="at-min")return rule.min;if(variant==="at-max")return rule.max;return rule.max===undefined?undefined:rule.max+step;}

@@ -1,0 +1,1 @@
+import assert from"node:assert/strict";import test from"node:test";import{deriveNumberValue}from"./derive.js";test("derives observed numeric boundaries only",()=>{assert.equal(deriveNumberValue({min:2,max:5},"above-max"),6);assert.equal(deriveNumberValue({},"at-min"),undefined);});
