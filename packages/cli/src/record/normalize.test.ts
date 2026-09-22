@@ -1,0 +1,2 @@
+import assert from "node:assert/strict";import test from "node:test";import{normalizeRecord}from"./normalize.js";
+test("merges only adjacent input events",()=>{const r=normalizeRecord([{sequence:1,documentId:"d",type:"input",target:"n"},{sequence:2,documentId:"d",type:"input",target:"n"},{sequence:3,documentId:"d",type:"click",target:"save"},{sequence:4,documentId:"d",type:"input",target:"n"}]);assert.deepEqual(r.map(x=>x.sequence),[2,3,4]);});
