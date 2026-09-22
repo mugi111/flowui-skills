@@ -5,6 +5,7 @@ import { dirname, join, resolve, sep } from "node:path";
 import type { UiModelDocument } from "../contracts/types.js";
 
 const modelIdPattern = /^[a-z][a-z0-9-]*$/;
+const writeLocks = new Map<string, Promise<void>>();
 
 export interface ModelConflict {
   readonly kind: "conflict";
@@ -65,6 +66,7 @@ export async function storeUiModel(
   expectedRevision?: string,
 ): Promise<StoreModelResult> {
   const path = modelPath(projectDirectory, model.page.id);
+  return withWriteLock(path, async () => {
   const current = await readUiModel(projectDirectory, model.page.id);
   const actualRevision = current?.revision;
   if (expectedRevision !== undefined && expectedRevision !== actualRevision) {
@@ -79,6 +81,20 @@ export async function storeUiModel(
   await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   await rename(temporaryPath, path);
   return { kind: "stored", revision, path };
+  });
+}
+
+async function withWriteLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const predecessor = writeLocks.get(path) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  writeLocks.set(path, predecessor.then(() => current));
+  await predecessor;
+  try { return await operation(); }
+  finally {
+    release();
+    if (writeLocks.get(path) === current) writeLocks.delete(path);
+  }
 }
 
 export function diffUiModels(before: UiModelDocument, after: UiModelDocument): ModelDiff {

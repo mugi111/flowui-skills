@@ -36,6 +36,17 @@ test("rejects a stale model revision without overwriting the stored Model", asyn
   assert.deepEqual((await readUiModel(projectDirectory, "user-edit"))?.elements, model.elements);
 });
 
+test("serializes concurrent updates with the same expected revision", async () => {
+  const projectDirectory = await mkdtemp(join(tmpdir(), "flowui-store-"));
+  const first = await storeUiModel(projectDirectory, model);
+  assert.equal(first.kind, "stored");
+  const results = await Promise.all([
+    storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "A" } }, first.revision),
+    storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "B" } }, first.revision),
+  ]);
+  assert.deepEqual(results.map((result) => result.kind), ["stored", "conflict"]);
+});
+
 test("reports semantic element changes by logical ID", () => {
   const before = { ...model, revision: "before" };
   const after = {

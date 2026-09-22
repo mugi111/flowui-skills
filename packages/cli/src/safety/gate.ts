@@ -23,7 +23,8 @@ export function evaluateGate(action: ActionDefinition, permit: Permit | undefine
   if (action.risk === "unknown") return { allowed: false, reason: "unknown-action" };
   if (action.risk === "read-only") return { allowed: true };
   if (permit === undefined) return { allowed: false, reason: "permit-required" };
-  if (Date.parse(permit.expiresAt) <= context.now.getTime()) return { allowed: false, reason: "permit-expired" };
+  const expiresAt = Date.parse(permit.expiresAt);
+  if (!Number.isFinite(expiresAt) || expiresAt <= context.now.getTime()) return { allowed: false, reason: "permit-expired" };
   if (permit.scenarioHash !== context.scenarioHash || permit.modelHash !== context.modelHash || permit.environment !== context.environment || !permit.actionIds.includes(action.id) || !permit.targetScopes.includes(action.targetScope)) {
     return { allowed: false, reason: "permit-mismatch" };
   }

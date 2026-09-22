@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { run } from "./index.js";
+import { run, runCommand } from "./index.js";
 
 test("prints help without a command", () => {
   const result = run([]);
@@ -21,4 +21,15 @@ test("rejects a command that is not implemented", () => {
 
   assert.equal(result.exitCode, 2);
   assert.match(result.output, /unsupported command/);
+});
+
+test("initializes the FlowUI project directory", async () => {
+  const previous = process.cwd();
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "flowui-init-"));
+  process.chdir(directory);
+  try { assert.equal((await runCommand(["init"])).exitCode, 0); }
+  finally { process.chdir(previous); }
 });

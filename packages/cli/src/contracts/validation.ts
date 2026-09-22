@@ -165,7 +165,8 @@ export function validateScenarioDocument(raw: unknown): ValidationResult<Scenari
     issues.push({ path: "/steps", code: "ready-requires-assertion", message: "a ready Scenario needs at least one assertion" });
   }
   if (issues.length > 0 || id === undefined || intent === undefined || startPage === undefined || (raw.status !== "draft" && raw.status !== "ready")) return { ok: false, issues };
-  return { ok: true, value: { schema_version: schemaVersion, id, status: raw.status, intent, start_page: startPage, steps } };
+  const inputs = raw.inputs === undefined ? undefined : raw.inputs as NonNullable<ScenarioDocument["inputs"]>;
+  return { ok: true, value: { schema_version: schemaVersion, id, status: raw.status, intent, start_page: startPage, ...(inputs === undefined ? {} : { inputs }), steps } };
 }
 
 export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelDocument> {
@@ -175,8 +176,16 @@ export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelD
   if (!isRecord(raw.page) || !isRecord(raw.page.identity)) {
     issues.push({ path: "/page", code: "invalid-page", message: "must include page identity" });
   }
+  if (isRecord(raw.page)) {
+    if (typeof raw.page.id !== "string" || !safeId.test(raw.page.id)) issues.push({ path: "/page/id", code: "invalid-id", message: "must use lowercase kebab-case" });
+    if (typeof raw.page.name !== "string" || raw.page.name.length === 0) issues.push({ path: "/page/name", code: "required-string", message: "must be a non-empty string" });
+    if (isRecord(raw.page.identity) && (!Array.isArray(raw.page.identity.landmarks) || raw.page.identity.landmarks.length === 0)) issues.push({ path: "/page/identity/landmarks", code: "invalid-landmarks", message: "must be a non-empty array" });
+  }
   if (typeof raw.revision !== "string" || raw.revision.length === 0) issues.push({ path: "/revision", code: "required-string", message: "must be a non-empty string" });
   if (!isRecord(raw.elements)) issues.push({ path: "/elements", code: "invalid-elements", message: "must be an object" });
+  else for (const [id, element] of Object.entries(raw.elements)) {
+    if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string") issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
+  }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: raw as unknown as UiModelDocument };
 }

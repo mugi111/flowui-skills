@@ -8,3 +8,4 @@ const permit = { scenarioHash: "scenario", modelHash: "model", environment: "tes
 test("blocks unknown actions even with a permit", () => assert.deepEqual(evaluateGate({ id: "save", risk: "unknown", targetScope: "user:42" }, permit, context), { allowed: false, reason: "unknown-action" }));
 test("requires a bound, unexpired permit for mutations", () => assert.deepEqual(evaluateGate({ id: "save", risk: "mutation", targetScope: "user:42" }, permit, context), { allowed: true }));
 test("rejects permits when the Model changes", () => assert.deepEqual(evaluateGate({ id: "save", risk: "mutation", targetScope: "user:42" }, { ...permit, modelHash: "old" }, context), { allowed: false, reason: "permit-mismatch" }));
+test("rejects an invalid permit expiry", () => assert.deepEqual(evaluateGate({ id: "save", risk: "mutation", targetScope: "user:42" }, { ...permit, expiresAt: "invalid" }, context), { allowed: false, reason: "permit-expired" }));
