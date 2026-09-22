@@ -16,7 +16,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/index.test.js dist/contracts/validation.test.js dist/knowledge/store.test.js dist/knowledge/capture.test.js dist/record/collector.test.js dist/record/normalize.test.js dist/resolver/target.test.js dist/safety/gate.test.js dist/scenario/inputs.test.js dist/scenario/engine.test.js dist/scenario/result.test.js dist/shared/redaction.test.js dist/session/session.test.js dist/observation/observe.test.js dist/observation/table.test.js"
+    "test": "npm run build && node --test dist/**/*.test.js"
   },
   "dependencies": {
     "playwright": "^1.63.0"
