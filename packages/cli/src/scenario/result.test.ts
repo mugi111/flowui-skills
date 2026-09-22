@@ -1,0 +1,3 @@
+import assert from "node:assert/strict"; import test from "node:test"; import { createRunResult } from "./result.js";
+const scenario={schema_version:"1.0" as const,id:"s",status:"draft" as const,intent:"x",start_page:"p",steps:[]}; const model={schema_version:"1.0" as const,page:{id:"p",name:"P",identity:{landmarks:[]}},revision:"fixed",elements:{}};
+test("pins the model revision into a new immutable result",()=>{const result=createRunResult("completed",scenario,[model]); assert.equal(result.modelHashes.p,"fixed"); assert.notEqual(result.runId,createRunResult("completed",scenario,[model]).runId);});
