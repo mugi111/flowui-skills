@@ -1,0 +1,20 @@
+{
+  "name": "flowui-skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Black-box UI exploration, scenario design, and browser automation skills.",
+  "license": "MIT",
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=@mugi111/flowui-skills",
+    "check": "npm run check --workspace=@mugi111/flowui-skills",
+    "test": "npm run test --workspace=@mugi111/flowui-skills"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
