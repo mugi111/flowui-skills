@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://flowui.dev/schemas/scenario.schema.json",
+  "title": "FlowUI Scenario",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "status", "intent", "start_page", "steps"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "status": { "enum": ["draft", "ready"] },
+    "intent": { "type": "string", "minLength": 1 },
+    "start_page": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+    "steps": { "type": "array", "minItems": 1 }
+  }
+}
