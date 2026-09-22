@@ -1,0 +1,2 @@
+import{mkdir,writeFile}from"node:fs/promises";import{join}from"node:path";
+export async function initialize(project:string):Promise<void>{const root=join(project,".flowui");for(const path of["ui-model","scenarios","results","analysis"])await mkdir(join(root,path),{recursive:true});await writeFile(join(root,"pages.yaml"),"pages: []\n",{flag:"wx"}).catch(e=>{if((e as NodeJS.ErrnoException).code!=="EEXIST")throw e;});}
