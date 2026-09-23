@@ -14,20 +14,17 @@ export class RecordCollector {
   add(event: IncomingRecordEvent): void {
     if (this.stopped) throw new Error("recording is stopped");
     if (!event || typeof event.documentId !== "string" || event.documentId.length === 0 || typeof event.target !== "string" || event.target.length === 0 || !["click", "input", "navigation"].includes(event.type)) {
-      this.stopped = true;
-      throw new Error("invalid recording event; recording stopped");
+      this.invalidate("invalid recording event; recording stopped");
     }
     if (event.input !== undefined && (!event.input || typeof event.input !== "object" || Object.values(event.input).some((value) => value !== undefined && typeof value !== "string"))) {
-      this.stopped = true;
-      throw new Error("invalid event metadata; recording stopped");
+      this.invalidate("invalid event metadata; recording stopped");
     }
     if (event.type !== "input" && event.value !== undefined) {
-      this.stopped = true;
-      throw new Error("unexpected event value; recording stopped");
+      this.invalidate("unexpected event value; recording stopped");
     }
     let value: RecordedValue | undefined;
     if (event.type === "input") {
-      if (!isRecordedValue(event.value)) { this.stopped = true; throw new Error("invalid input event; recording stopped"); }
+      if (!isRecordedValue(event.value)) this.invalidate("invalid input event; recording stopped");
       const sensitivity = classifySensitivity({ ...event.input, targetId: event.input?.targetId ?? event.target }, this.policy);
       const candidate = event.value;
       const masked = candidate.kind === "literal" && /^\s*[•●*xX]{3,}\s*$/.test(candidate.value);
@@ -40,6 +37,7 @@ export class RecordCollector {
     this.events.push({ sequence: this.events.length + 1, documentId: event.documentId, type: event.type, target: event.target, ...(value === undefined ? {} : { value }) });
   }
   stop(): readonly RecordedEvent[] { this.stopped = true; return this.events; }
+  private invalidate(message: string): never { this.stopped = true; this.events = []; throw new Error(message); }
 }
 
 function isRecordedValue(value: unknown): value is RecordedValue {

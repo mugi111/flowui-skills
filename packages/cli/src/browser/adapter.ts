@@ -2,11 +2,13 @@ import { chromium, type Browser, type BrowserContext, type Page } from "playwrig
 
 export interface BrowserTab {
   readonly id: string;
+  readonly page?: Page;
   readonly isClosed: () => boolean;
   readonly onClose: (listener: () => void) => void;
 }
 
 export interface BrowserRuntime {
+  readonly context?: BrowserContext;
   readonly tabs: () => readonly BrowserTab[];
   readonly close: () => Promise<void>;
 }
@@ -18,7 +20,7 @@ export interface BrowserLauncher {
 class PlaywrightTab implements BrowserTab {
   readonly id = crypto.randomUUID();
 
-  constructor(private readonly page: Page) {}
+  constructor(readonly page: Page) {}
 
   isClosed(): boolean {
     return this.page.isClosed();
@@ -34,7 +36,7 @@ class PlaywrightRuntime implements BrowserRuntime {
 
   constructor(
     private readonly browser: Browser,
-    private readonly context: BrowserContext,
+    readonly context: BrowserContext,
   ) {}
 
   tabs(): readonly BrowserTab[] {

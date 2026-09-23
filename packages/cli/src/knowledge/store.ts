@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 
 import type { UiModelDocument } from "../contracts/types.js";
@@ -25,6 +25,7 @@ export interface ModelStored {
 }
 
 export type StoreModelResult = ModelStored | ModelConflict;
+export type StoreWriteMode = { readonly mode: "create" } | { readonly mode: "update"; readonly expectedRevision: string };
 
 export interface ModelDiff {
   readonly pageIdentityChanged: boolean;
@@ -68,14 +69,14 @@ export async function readUiModel(projectDirectory: string, pageId: string): Pro
 export async function storeUiModel(
   projectDirectory: string,
   model: Omit<UiModelDocument, "revision">,
-  expectedRevision?: string,
+  writeMode: StoreWriteMode = { mode: "create" },
 ): Promise<StoreModelResult> {
   const path = modelPath(projectDirectory, model.page.id);
   return withWriteLock(path, async () => {
   const current = await readUiModel(projectDirectory, model.page.id);
   const actualRevision = current?.revision;
-  if (expectedRevision === undefined ? current !== undefined : expectedRevision !== actualRevision) {
-    return { kind: "conflict", expectedRevision: expectedRevision ?? "<new>", actualRevision };
+  if ((writeMode.mode === "create" && current !== undefined) || (writeMode.mode === "update" && writeMode.expectedRevision !== actualRevision)) {
+    return { kind: "conflict", expectedRevision: writeMode.mode === "create" ? "<new>" : writeMode.expectedRevision, actualRevision };
   }
 
   const documentWithoutRevision = { ...model };
@@ -99,10 +100,14 @@ async function withWriteLock<T>(path: string, operation: () => Promise<T>): Prom
   const deadline = Date.now() + lockWaitMs;
   await mkdir(dirname(path), { recursive: true });
   let lock;
+  let ownerStat: Awaited<ReturnType<typeof lstat>> | undefined;
   while (!lock) {
     try {
       lock = await open(lockPath, "wx", 0o600);
-      try { await lock.writeFile(`${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() })}\n`); }
+      try {
+        await lock.writeFile(`${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() })}\n`);
+        ownerStat = await lock.stat();
+      }
       catch (error) { await lock.close(); await unlink(lockPath); throw error; }
     } catch (error) {
       if (!isAlreadyExistsError(error)) throw error;
@@ -114,8 +119,8 @@ async function withWriteLock<T>(path: string, operation: () => Promise<T>): Prom
   finally {
     await lock.close();
     try {
-      const owner = JSON.parse(await readFile(lockPath, "utf8")) as { token?: string };
-      if (owner.token === token) await unlink(lockPath);
+      const current = await lstat(lockPath);
+      if (ownerStat && current.dev === ownerStat.dev && current.ino === ownerStat.ino) await unlink(lockPath);
     } catch (error) { if (!isNotFoundError(error)) throw error; }
   }
 }

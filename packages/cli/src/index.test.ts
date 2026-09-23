@@ -33,3 +33,28 @@ test("initializes the FlowUI project directory", async () => {
   try { assert.equal((await runCommand(["init"])).exitCode, 0); }
   finally { process.chdir(previous); }
 });
+
+test("handles command help before performing side effects", async () => {
+  const previous = process.cwd();
+  const { mkdtemp, access } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "flowui-help-"));
+  process.chdir(directory);
+  try {
+    const result = await runCommand(["init", "--help"]);
+    assert.equal(result.exitCode, 0);
+    await assert.rejects(access(join(directory, ".flowui")));
+  } finally { process.chdir(previous); }
+});
+
+test("reports a missing persistent browser session cleanly", async () => {
+  const previous = process.cwd();
+  const { mkdtemp } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = await mkdtemp(join(tmpdir(), "flowui-session-test-"));
+  process.chdir(directory);
+  try { assert.deepEqual(await runCommand(["session", "status"]), { exitCode: 2, output: "SESSION_NOT_FOUND" }); }
+  finally { process.chdir(previous); }
+});

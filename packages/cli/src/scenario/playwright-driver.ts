@@ -41,7 +41,7 @@ export function createPlaywrightExecutionDriver(page: Page, models: Readonly<Rec
       }
       return matches;
     },
-    classifyAction: async (step, target) => ({ id: step.action, risk: "mutation", targetScope: target.scope }),
+    classifyAction: async (step, target) => ({ id: step.id, risk: step.action === "navigate" ? "unknown" : "mutation", targetScope: target.scope }),
     sendAction: async (step, target, value) => {
       const locator = locatorFor(target.id, step.page);
       if (!locator) throw new Error("Target is missing from the fixed Model snapshot");

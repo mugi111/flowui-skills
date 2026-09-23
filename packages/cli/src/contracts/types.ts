@@ -70,7 +70,7 @@ export interface UiModelDocument {
     };
   };
   readonly revision: string;
-  readonly elements: Readonly<Record<string, { readonly state: KnowledgeState; readonly role: string; readonly name: string }>>;
+  readonly elements: Readonly<Record<string, { readonly state: KnowledgeState; readonly role: string; readonly name: string; readonly inputType?: string; readonly autocomplete?: string }>>;
 }
 
 export interface ValidationIssue {

@@ -2,6 +2,7 @@ import { validateScenarioDocument, validateScenarioAgainstModel, validateUiModel
 import type { ScenarioDocument, UiModelDocument } from "../contracts/types.js";
 import { contentHash } from "../knowledge/store.js";
 import { evaluateGate, type ActionDefinition, type Permit } from "../safety/gate.js";
+import { classifySensitivity, type RedactionPolicy } from "../shared/redaction.js";
 
 export interface ResolvedTarget { readonly id: string; readonly scope: string; readonly inputConstraints?: Readonly<Record<string, unknown>>; }
 export interface ExecutionDriver {
@@ -22,6 +23,7 @@ export interface ExecuteScenarioRequest {
   readonly permit?: Permit;
   readonly environment: string;
   readonly testMode?: boolean;
+  readonly redactionPolicy?: RedactionPolicy;
   readonly pauseBefore?: string;
   readonly driver: ExecutionDriver;
   readonly now?: Date;
@@ -30,6 +32,7 @@ export interface ExecuteScenarioRequest {
 export type ExecuteScenarioResult = { readonly status: "passed" | "failed" | "blocked" | "paused" | "ACTION_OUTCOME_UNKNOWN"; readonly completedSteps: readonly string[]; readonly scenarioHash: string; readonly modelHash: string };
 
 export async function executeScenario(request: ExecuteScenarioRequest): Promise<ExecuteScenarioResult> {
+  if (request.permit !== undefined && !isWellFormedPermit(request.permit)) throw new Error("invalid Permit");
   const validated = validateScenarioDocument(request.scenario);
   if (!validated.ok) throw new Error(`invalid Scenario: ${validated.issues.map((issue) => issue.code).join(",")}`);
   const scenario: ScenarioDocument = structuredClone(validated.value);
@@ -51,11 +54,20 @@ export async function executeScenario(request: ExecuteScenarioRequest): Promise<
     const check = validateScenarioAgainstModel({ ...scenario, start_page: page, steps: pageSteps }, modelFor(page));
     if (!check.ok) throw new Error(`Scenario and UI Model mismatch: ${check.issues.map((issue) => issue.code).join(",")}`);
   }
+  for (const step of scenario.steps) {
+    if (!("action" in step) || !["fill", "select", "press"].includes(step.action)) continue;
+    const element = modelFor(step.page).elements[step.target];
+    const sensitivity = classifySensitivity({ targetId: step.target, ...(element === undefined ? {} : { name: element.name, ...(element.inputType === undefined ? {} : { inputType: element.inputType }), ...(element.autocomplete === undefined ? {} : { autocomplete: element.autocomplete }) }) }, request.redactionPolicy);
+    const secretValue = step.value !== undefined && typeof step.value === "object" && "secret" in step.value;
+    if (sensitivity === "sensitive" && !secretValue) throw new Error(`sensitive target requires a secret reference: ${step.target}`);
+    if (sensitivity === "unknown" && !secretValue) throw new Error(`unknown target sensitivity requires a secret reference: ${step.target}`);
+  }
   const declaredInputs = scenario.inputs ?? {};
   for (const [id, definition] of Object.entries(declaredInputs)) {
     const value = request.inputs?.[id];
     if (value === undefined) throw new Error(`missing input: ${id}`);
     if (typeof value !== definition.type) throw new Error(`invalid input type: ${id}`);
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error(`invalid input value: ${id}`);
   }
   for (const step of scenario.steps) if ("action" in step && step.value && typeof step.value === "object" && "secret" in step.value) {
     if (typeof request.secrets?.[step.value.secret] !== "string") throw new Error(`unresolved secret: ${step.value.secret}`);
@@ -97,4 +109,18 @@ export async function executeScenario(request: ExecuteScenarioRequest): Promise<
     } finally { release(); }
   }
   return { status: scenario.steps.some((step) => "assert" in step) ? "passed" : "failed", completedSteps, scenarioHash, modelHash };
+}
+
+function isWellFormedPermit(raw: unknown): raw is Permit {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const permit = raw as Record<string, unknown>;
+  const nonEmpty = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+  if (!nonEmpty(permit.scenarioHash) || !nonEmpty(permit.modelHash) || !nonEmpty(permit.environment) || !nonEmpty(permit.origin) || !nonEmpty(permit.expiresAt)) return false;
+  if (!Array.isArray(permit.actionIds) || !permit.actionIds.every(nonEmpty) || !Array.isArray(permit.targetScopes) || !permit.targetScopes.every(nonEmpty)) return false;
+  if (permit.actionBindings !== undefined && (!permit.actionBindings || typeof permit.actionBindings !== "object" || Array.isArray(permit.actionBindings) || Object.values(permit.actionBindings).some((value) => !nonEmpty(value)))) return false;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(permit.expiresAt) || !Number.isFinite(Date.parse(permit.expiresAt))) return false;
+  try {
+    const origin = new URL(permit.origin);
+    return (origin.protocol === "https:" || origin.protocol === "http:") && origin.origin === permit.origin && origin.pathname === "/" && !origin.search && !origin.hash && !origin.username && !origin.password;
+  } catch { return false; }
 }

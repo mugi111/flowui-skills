@@ -6,6 +6,8 @@ export interface ObservationElement {
   readonly id: string;
   readonly role: string;
   readonly name: string;
+  readonly inputType?: string;
+  readonly autocomplete?: string;
   readonly visible: boolean;
   readonly enabled: boolean;
   readonly locatorCandidates: readonly string[];
@@ -98,6 +100,8 @@ export async function observePage(page: Page, options: ObserveOptions = {}): Pro
             id: `observed-${index + 1}`,
             role: inferRole(element),
             name: nameFor(element),
+            ...(element.tagName === "INPUT" ? { inputType: (element as HTMLInputElement).type.toLowerCase() } : element.tagName === "TEXTAREA" ? { inputType: "textarea" } : element.tagName === "SELECT" ? { inputType: "select" } : {}),
+            ...(element.matches("input,textarea,select") && element.hasAttribute("autocomplete") ? { autocomplete: element.getAttribute("autocomplete")! } : {}),
             visible: isVisible(element),
             enabled: !control.disabled && element.getAttribute("aria-disabled") !== "true",
             locatorCandidates: candidates(element),

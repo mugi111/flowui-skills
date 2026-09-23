@@ -60,6 +60,7 @@ function validateInputs(raw: unknown, issues: ValidationIssue[]): ReadonlyMap<st
   }
   for (const [id, definition] of Object.entries(raw)) {
     validateId(id, `/inputs/${id}`, issues);
+    if (isRecord(definition)) hasOnlyKeys(definition, ["type", "sensitive"], `/inputs/${id}`, issues);
     if (!isRecord(definition) || (definition.type !== "string" && definition.type !== "number" && definition.type !== "boolean") || typeof definition.sensitive !== "boolean") {
       issues.push({ path: `/inputs/${id}`, code: "invalid-input-definition", message: "must define a type and sensitive flag" });
       continue;
@@ -93,6 +94,15 @@ function validateStep(rawStep: unknown, index: number, sensitiveInputs: Readonly
     if (typeof action !== "string" || !actionNames.has(action as ActionName)) {
       issues.push({ path: `${path}/action`, code: "invalid-action", message: "must be a supported action" });
       return undefined;
+    }
+    if (["fill", "select", "press", "navigate"].includes(action) && rawStep.value === undefined) {
+      issues.push({ path: `${path}/value`, code: "missing-action-value", message: "this action requires a value" });
+    }
+    if (["click", "check", "uncheck"].includes(action) && rawStep.value !== undefined) {
+      issues.push({ path: `${path}/value`, code: "unexpected-action-value", message: "this action does not accept a value" });
+    }
+    if (rawStep.value !== undefined && !isRecord(rawStep.value) && rawStep.value !== null && (!["string", "number", "boolean"].includes(typeof rawStep.value) || (typeof rawStep.value === "number" && !Number.isFinite(rawStep.value)))) {
+      issues.push({ path: `${path}/value`, code: "invalid-value", message: "must be a string, number, boolean, or reference" });
     }
     if (isRecord(rawStep.value)) {
       const valueKeys = Object.keys(rawStep.value);
@@ -133,6 +143,8 @@ function validateStep(rawStep: unknown, index: number, sensitiveInputs: Readonly
   if (expectation.source !== "user-intent" || typeof expectation.reference !== "string" || expectation.reference.length === 0) {
     issues.push({ path: `${path}/expectation`, code: "missing-expectation", message: "must have a user-intent reference" });
   }
+  hasOnlyKeys(expectation, ["source", "reference"], `${path}/expectation`, issues);
+  if (assertion.equals !== undefined && !["string", "number", "boolean"].includes(typeof assertion.equals)) issues.push({ path: `${path}/assert/equals`, code: "invalid-equals", message: "must be a string, number, or boolean" });
   if (id === undefined || page === undefined || target === undefined || typeof type !== "string" || !assertionTypes.has(type as AssertionType)) return undefined;
   return {
     id,
@@ -195,8 +207,8 @@ export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelD
   if (typeof raw.revision !== "string" || raw.revision.length === 0) issues.push({ path: "/revision", code: "required-string", message: "must be a non-empty string" });
   if (!isRecord(raw.elements)) issues.push({ path: "/elements", code: "invalid-elements", message: "must be an object" });
   else for (const [id, element] of Object.entries(raw.elements)) {
-    if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string") issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
-    else hasOnlyKeys(element, ["state", "role", "name"], `/elements/${id}`, issues);
+    if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string" || (element.inputType !== undefined && typeof element.inputType !== "string") || (element.autocomplete !== undefined && typeof element.autocomplete !== "string")) issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
+    else hasOnlyKeys(element, ["state", "role", "name", "inputType", "autocomplete"], `/elements/${id}`, issues);
   }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: raw as unknown as UiModelDocument };

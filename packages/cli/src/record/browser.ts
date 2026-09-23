@@ -1,5 +1,5 @@
-import type { BrowserContext, Page } from "playwright";
-import type { RedactionPolicy } from "../shared/redaction.js";
+import type { BrowserContext, Frame, Page } from "playwright";
+import { redactUrl, type RedactionPolicy } from "../shared/redaction.js";
 import { RecordCollector } from "./collector.js";
 
 export interface BrowserRecordOptions extends RedactionPolicy {
@@ -65,10 +65,22 @@ export async function subscribeBrowserRecord(context: BrowserContext, collector:
   const installerOptions = { binding: bindingName, configuredKeys, secretReferences: { ...secretReferences }, documentId };
   const disposeScript = await context.addInitScript(installer, installerOptions);
   await Promise.all(context.pages().map((page) => page.evaluate(installer, installerOptions)));
-  const onPage = (page: Page) => page.on("close", () => undefined);
+  const navigations = new Map<Page, (frame: Frame) => void>();
+  const onPage = (page: Page) => {
+    if (navigations.has(page)) return;
+    const listener = (frame: Frame) => {
+      if (page.mainFrame() !== frame) return;
+      collector.add({ documentId: crypto.randomUUID(), type: "navigation", target: redactUrl(page.url(), options) });
+    };
+    navigations.set(page, listener);
+    page.on("framenavigated", listener);
+  };
+  for (const page of context.pages()) onPage(page);
   context.on("page", onPage);
   return () => {
     context.off("page", onPage);
+    for (const [page, listener] of navigations) page.off("framenavigated", listener);
+    navigations.clear();
     for (const page of context.pages()) void page.evaluate((binding) => {
       const scope = window as unknown as Record<string, unknown>;
       const cleanup = scope[`${binding}_cleanup`];

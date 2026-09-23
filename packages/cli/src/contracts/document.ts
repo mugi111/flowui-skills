@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
 import { parseDocument, visit } from "yaml";
 
@@ -15,12 +15,21 @@ export class DocumentLoadError extends Error {
 export async function loadDocument(file: string): Promise<unknown> {
   const extension = extname(file).toLowerCase();
   if (![".yaml", ".yml", ".json"].includes(extension)) throw new DocumentLoadError(file, "UNSUPPORTED_FORMAT");
+  const metadata = await stat(file);
+  if (metadata.size > maxDocumentBytes) throw new DocumentLoadError(file, "DOCUMENT_TOO_LARGE");
   const buffer = await readFile(file);
   if (buffer.byteLength > maxDocumentBytes) throw new DocumentLoadError(file, "DOCUMENT_TOO_LARGE");
   const source = buffer.toString("utf8");
   if (extension === ".json") {
     try { return JSON.parse(source) as unknown; }
-    catch { throw new DocumentLoadError(file, "INVALID_JSON"); }
+    catch (error) {
+      const match = error instanceof SyntaxError ? /position (\d+)/i.exec(error.message) : null;
+      if (!match) throw new DocumentLoadError(file, "INVALID_JSON");
+      const offset = Number(match[1]);
+      const prefix = source.slice(0, offset);
+      const lines = prefix.split("\n");
+      throw new DocumentLoadError(file, "INVALID_JSON", lines.length, (lines.at(-1)?.length ?? 0) + 1);
+    }
   }
   const document = parseDocument(source, { uniqueKeys: true, prettyErrors: false });
   const syntaxError = document.errors[0];
