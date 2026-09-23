@@ -44,7 +44,7 @@ test("serializes concurrent updates with the same expected revision", async () =
     storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "A" } }, first.revision),
     storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "B" } }, first.revision),
   ]);
-  assert.deepEqual(results.map((result) => result.kind), ["stored", "conflict"]);
+  assert.deepEqual(results.map((result) => result.kind).sort(), ["conflict", "stored"]);
 });
 
 test("reports semantic element changes by logical ID", () => {

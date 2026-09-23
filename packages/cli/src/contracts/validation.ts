@@ -172,19 +172,31 @@ export function validateScenarioDocument(raw: unknown): ValidationResult<Scenari
 export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelDocument> {
   const issues: ValidationIssue[] = [];
   if (!isRecord(raw)) return { ok: false, issues: [{ path: "/", code: "invalid-type", message: "must be an object" }] };
+  hasOnlyKeys(raw, ["schema_version", "page", "revision", "elements"], "", issues);
   if (raw.schema_version !== schemaVersion) issues.push({ path: "/schema_version", code: "unsupported-version", message: `must equal ${schemaVersion}` });
   if (!isRecord(raw.page) || !isRecord(raw.page.identity)) {
     issues.push({ path: "/page", code: "invalid-page", message: "must include page identity" });
   }
   if (isRecord(raw.page)) {
+    hasOnlyKeys(raw.page, ["id", "name", "identity"], "/page", issues);
     if (typeof raw.page.id !== "string" || !safeId.test(raw.page.id)) issues.push({ path: "/page/id", code: "invalid-id", message: "must use lowercase kebab-case" });
     if (typeof raw.page.name !== "string" || raw.page.name.length === 0) issues.push({ path: "/page/name", code: "required-string", message: "must be a non-empty string" });
-    if (isRecord(raw.page.identity) && (!Array.isArray(raw.page.identity.landmarks) || raw.page.identity.landmarks.length === 0)) issues.push({ path: "/page/identity/landmarks", code: "invalid-landmarks", message: "must be a non-empty array" });
+    if (isRecord(raw.page.identity)) {
+      hasOnlyKeys(raw.page.identity, ["landmarks"], "/page/identity", issues);
+      const landmarks = raw.page.identity.landmarks;
+      if (!Array.isArray(landmarks) || landmarks.length === 0) issues.push({ path: "/page/identity/landmarks", code: "invalid-landmarks", message: "must be a non-empty array" });
+      else landmarks.forEach((landmark, index) => {
+        if (!isRecord(landmark) || typeof landmark.role !== "string" || !["heading", "main", "navigation", "banner", "contentinfo", "form", "region"].includes(landmark.role) || typeof landmark.name !== "string" || landmark.name.trim().length === 0) {
+          issues.push({ path: `/page/identity/landmarks/${index}`, code: "invalid-landmark", message: "must define a supported role and non-empty name" });
+        } else hasOnlyKeys(landmark, ["role", "name"], `/page/identity/landmarks/${index}`, issues);
+      });
+    }
   }
   if (typeof raw.revision !== "string" || raw.revision.length === 0) issues.push({ path: "/revision", code: "required-string", message: "must be a non-empty string" });
   if (!isRecord(raw.elements)) issues.push({ path: "/elements", code: "invalid-elements", message: "must be an object" });
   else for (const [id, element] of Object.entries(raw.elements)) {
     if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string") issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
+    else hasOnlyKeys(element, ["state", "role", "name"], `/elements/${id}`, issues);
   }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: raw as unknown as UiModelDocument };

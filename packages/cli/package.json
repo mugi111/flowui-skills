@@ -16,9 +16,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test dist/**/*.test.js"
+    "test": "rm -rf dist && npm run build && node scripts/run-tests.mjs"
   },
   "dependencies": {
-    "playwright": "^1.63.0"
+    "playwright": "^1.63.0",
+    "yaml": "^2.9.1"
   }
 }
