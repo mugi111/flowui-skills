@@ -2,13 +2,16 @@
 
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
 
 import { loadDocument } from "./contracts/document.js";
 import { validateScenarioAgainstModel, validateScenarioDocument, validateUiModelDocument } from "./contracts/validation.js";
 import { initialize } from "./init.js";
+import { renderPlaywright } from "./render/playwright.js";
 export { executeScenario } from "./scenario/execute.js";
 export { RecordCollector } from "./record/collector.js";
 export { subscribeBrowserRecord } from "./record/browser.js";
+export { createPlaywrightExecutionDriver } from "./scenario/playwright-driver.js";
 
 const packageName = "@mugi111/flowui-skills";
 const version = "0.1.0";
@@ -81,6 +84,27 @@ export async function runCommand(argv: readonly string[]): Promise<{ exitCode: n
       return issues.length === 0 ? { exitCode: 0, output: "Valid" } : { exitCode: 2, output: JSON.stringify(issues) };
     }
     return { exitCode: 2, output: JSON.stringify(result.issues) };
+  }
+  if (command === "render" && kind === "playwright") {
+    const outputIndex = argv.indexOf("--out");
+    if (argv.length !== 3 && !(argv.length === 5 && outputIndex === 3 && argv[4] !== undefined)) return { exitCode: 2, output: "Usage: flowui render playwright <scenario-file> [--out <test-file>]" };
+    const scenarioRaw = await loadDocument(file!);
+    const scenario = validateScenarioDocument(scenarioRaw);
+    if (!scenario.ok) return { exitCode: 2, output: JSON.stringify(scenario.issues) };
+    const models: Record<string, import("./contracts/types.js").UiModelDocument> = {};
+    const pages = new Set([scenario.value.start_page, ...scenario.value.steps.map((step) => step.page)]);
+    for (const page of pages) {
+      const modelRaw = await loadDocument(join(process.cwd(), ".flowui", "ui-model", `${page}.json`));
+      const model = validateUiModelDocument(modelRaw);
+      if (!model.ok) return { exitCode: 2, output: JSON.stringify(model.issues) };
+      models[page] = model.value;
+    }
+    const output = renderPlaywright(scenario.value, models);
+    if (outputIndex >= 0) {
+      await writeFile(argv[4]!, output, { encoding: "utf8", flag: "wx" });
+      return { exitCode: 0, output: `Rendered ${argv[4]}` };
+    }
+    return { exitCode: 0, output };
   }
   return run(argv);
 }
