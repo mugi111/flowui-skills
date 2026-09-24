@@ -18,6 +18,12 @@ test("redacts sensitive URL query parameters", () => {
   assert.equal(value, "https://example.test/profile?token=%5BREDACTED%5D&view=summary&account=%5BREDACTED%5D");
 });
 
+test("redacts camel-case secret keys and project-sensitive query parameters", () => {
+  assert.deepEqual(redactValue({ clientSecret: "private", apiKey: "private" }), { clientSecret: "[REDACTED]", apiKey: "[REDACTED]" });
+  assert.match(redactUrl("https://example.test/?custom=private", { sensitiveFields: ["custom"] }), /custom=%5BREDACTED%5D/);
+  assert.equal(redactUrl("not a url?token=private"), "[REDACTED_URL]");
+});
+
 test("log output cannot expose nested secret values", () => {
   const output = redactLog({ error: { authorization: "Bearer private-token" }, message: "request failed" });
 

@@ -30,10 +30,29 @@ test("rejects a stale model revision without overwriting the stored Model", asyn
   const projectDirectory = await mkdtemp(join(tmpdir(), "flowui-store-"));
   const first = await storeUiModel(projectDirectory, model);
   assert.equal(first.kind, "stored");
-  const conflict = await storeUiModel(projectDirectory, { ...model, elements: {} }, "stale-revision");
+  const conflict = await storeUiModel(projectDirectory, { ...model, elements: {} }, { mode: "update", expectedRevision: "stale-revision" });
 
   assert.deepEqual(conflict, { kind: "conflict", expectedRevision: "stale-revision", actualRevision: first.revision });
   assert.deepEqual((await readUiModel(projectDirectory, "user-edit"))?.elements, model.elements);
+});
+
+test("serializes concurrent updates with the same expected revision", async () => {
+  const projectDirectory = await mkdtemp(join(tmpdir(), "flowui-store-"));
+  const first = await storeUiModel(projectDirectory, model);
+  assert.equal(first.kind, "stored");
+  const results = await Promise.all([
+    storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "A" } }, { mode: "update", expectedRevision: first.revision }),
+    storeUiModel(projectDirectory, { ...model, page: { ...model.page, name: "B" } }, { mode: "update", expectedRevision: first.revision }),
+  ]);
+  assert.deepEqual(results.map((result) => result.kind).sort(), ["conflict", "stored"]);
+});
+
+test("treats create over an existing Model as a conflict", async () => {
+  const projectDirectory = await mkdtemp(join(tmpdir(), "flowui-store-"));
+  const first = await storeUiModel(projectDirectory, model);
+  assert.equal(first.kind, "stored");
+  const conflict = await storeUiModel(projectDirectory, { ...model, elements: {} }, { mode: "create" });
+  assert.deepEqual(conflict, { kind: "conflict", expectedRevision: "<new>", actualRevision: first.revision });
 });
 
 test("reports semantic element changes by logical ID", () => {

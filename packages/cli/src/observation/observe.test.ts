@@ -22,6 +22,7 @@ test("observes semantic interactive elements without capturing input values", as
       ["button", "Save", true],
       ["button", "Disabled action", false],
     ]);
+    assert.equal(observation.elements[0]?.inputType, "password");
     assert.doesNotMatch(JSON.stringify(observation), /do-not-leak/);
   } finally {
     await browser.close();

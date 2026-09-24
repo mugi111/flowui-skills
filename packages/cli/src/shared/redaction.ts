@@ -14,6 +14,7 @@ const defaultSensitiveKeys = new Set([
 
 export interface RedactionPolicy {
   readonly sensitiveKeys?: readonly string[];
+  readonly sensitiveFields?: readonly string[];
   readonly sensitiveQueryParameters?: readonly string[];
   readonly replacement?: string;
 }
@@ -25,7 +26,29 @@ export interface RedactedText {
 }
 
 function normalizedSensitiveKeys(policy: RedactionPolicy): Set<string> {
-  return new Set([...defaultSensitiveKeys, ...(policy.sensitiveKeys ?? [])].map((key) => key.toLowerCase()));
+  return new Set([...defaultSensitiveKeys, ...(policy.sensitiveKeys ?? []), ...(policy.sensitiveFields ?? [])].map((key) => key.trim().toLowerCase()));
+}
+
+function isSensitiveKey(key: string, configured: ReadonlySet<string>): boolean {
+  return configured.has(key.trim().toLowerCase()) || /password|passphrase|secret|token|authorization|cookie|api[_-]?key/i.test(key);
+}
+
+export type Sensitivity = "public" | "sensitive" | "unknown";
+export interface SensitivityContext {
+  readonly inputType?: string;
+  readonly autocomplete?: string;
+  readonly targetId?: string;
+  readonly name?: string;
+  readonly label?: string;
+}
+
+export function classifySensitivity(context: SensitivityContext, policy: RedactionPolicy = {}): Sensitivity {
+  const sensitive = normalizedSensitiveKeys(policy);
+  const identifiers = [context.targetId, context.name, context.label].filter((item): item is string => typeof item === "string");
+  if (context.inputType?.toLowerCase() === "password" || /password|one-time-code|cc-|credit-card|transaction-/i.test(context.autocomplete ?? "")) return "sensitive";
+  if (identifiers.some((value) => isSensitiveKey(value, sensitive))) return "sensitive";
+  if (context.inputType !== undefined && !["text", "search", "email", "tel", "url", "number", "checkbox", "radio", "date", "textarea", "select"].includes(context.inputType.toLowerCase())) return "unknown";
+  return context.inputType !== undefined || context.name !== undefined || context.label !== undefined ? "public" : "unknown";
 }
 
 function replacement(policy: RedactionPolicy): string {
@@ -35,13 +58,13 @@ function replacement(policy: RedactionPolicy): string {
 export function redactUrl(rawUrl: string, policy: RedactionPolicy = {}): string {
   try {
     const url = new URL(rawUrl);
-    const sensitiveParameters = new Set([...(policy.sensitiveQueryParameters ?? []), ...defaultSensitiveKeys].map((key) => key.toLowerCase()));
+    const sensitiveParameters = normalizedSensitiveKeys({ ...policy, sensitiveKeys: [...(policy.sensitiveKeys ?? []), ...(policy.sensitiveFields ?? []), ...(policy.sensitiveQueryParameters ?? [])] });
     for (const [key] of url.searchParams) {
-      if (sensitiveParameters.has(key.toLowerCase())) url.searchParams.set(key, replacement(policy));
+      if (isSensitiveKey(key, sensitiveParameters)) url.searchParams.set(key, replacement(policy));
     }
     return url.toString();
   } catch {
-    return rawUrl;
+    return "[REDACTED_URL]";
   }
 }
 
@@ -54,7 +77,7 @@ export function redactValue(value: unknown, policy: RedactionPolicy = {}): unkno
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).map(([key, child]) => [
       key,
-      sensitiveKeys.has(key.toLowerCase()) ? redact : redactValue(child, policy),
+      isSensitiveKey(key, sensitiveKeys) ? redact : redactValue(child, policy),
     ]),
   );
 }

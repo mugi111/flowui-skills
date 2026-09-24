@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateScenarioAgainstModel, validateScenarioDocument } from "./validation.js";
+import { validateScenarioAgainstModel, validateScenarioDocument, validateUiModelDocument } from "./validation.js";
 
 const readyScenario = {
   schema_version: "1.0",
@@ -76,4 +76,10 @@ test("rejects a ready Scenario whose target is absent from the Model", () => {
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.ok(result.issues.some((issue) => issue.code === "unresolved-target"));
+});
+
+test("rejects null and malformed Page landmarks", () => {
+  const result = validateUiModelDocument({ schema_version: "1.0", page: { id: "p", name: "Page", identity: { landmarks: [null] } }, revision: "r", elements: {} });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.ok(result.issues.some((issue) => issue.code === "invalid-landmark"));
 });

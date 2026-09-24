@@ -60,6 +60,7 @@ function validateInputs(raw: unknown, issues: ValidationIssue[]): ReadonlyMap<st
   }
   for (const [id, definition] of Object.entries(raw)) {
     validateId(id, `/inputs/${id}`, issues);
+    if (isRecord(definition)) hasOnlyKeys(definition, ["type", "sensitive"], `/inputs/${id}`, issues);
     if (!isRecord(definition) || (definition.type !== "string" && definition.type !== "number" && definition.type !== "boolean") || typeof definition.sensitive !== "boolean") {
       issues.push({ path: `/inputs/${id}`, code: "invalid-input-definition", message: "must define a type and sensitive flag" });
       continue;
@@ -93,6 +94,15 @@ function validateStep(rawStep: unknown, index: number, sensitiveInputs: Readonly
     if (typeof action !== "string" || !actionNames.has(action as ActionName)) {
       issues.push({ path: `${path}/action`, code: "invalid-action", message: "must be a supported action" });
       return undefined;
+    }
+    if (["fill", "select", "press", "navigate"].includes(action) && rawStep.value === undefined) {
+      issues.push({ path: `${path}/value`, code: "missing-action-value", message: "this action requires a value" });
+    }
+    if (["click", "check", "uncheck"].includes(action) && rawStep.value !== undefined) {
+      issues.push({ path: `${path}/value`, code: "unexpected-action-value", message: "this action does not accept a value" });
+    }
+    if (rawStep.value !== undefined && !isRecord(rawStep.value) && rawStep.value !== null && (!["string", "number", "boolean"].includes(typeof rawStep.value) || (typeof rawStep.value === "number" && !Number.isFinite(rawStep.value)))) {
+      issues.push({ path: `${path}/value`, code: "invalid-value", message: "must be a string, number, boolean, or reference" });
     }
     if (isRecord(rawStep.value)) {
       const valueKeys = Object.keys(rawStep.value);
@@ -133,6 +143,11 @@ function validateStep(rawStep: unknown, index: number, sensitiveInputs: Readonly
   if (expectation.source !== "user-intent" || typeof expectation.reference !== "string" || expectation.reference.length === 0) {
     issues.push({ path: `${path}/expectation`, code: "missing-expectation", message: "must have a user-intent reference" });
   }
+  hasOnlyKeys(expectation, ["source", "reference"], `${path}/expectation`, issues);
+  if (assertion.equals !== undefined && !["string", "number", "boolean"].includes(typeof assertion.equals)) issues.push({ path: `${path}/assert/equals`, code: "invalid-equals", message: "must be a string, number, or boolean" });
+  if (["text", "value", "url", "row-count", "state"].includes(String(type)) && assertion.equals === undefined) issues.push({ path: `${path}/assert/equals`, code: "required-equals", message: "this assertion requires an expected value" });
+  if (type === "row-count" && (typeof assertion.equals !== "number" || !Number.isSafeInteger(assertion.equals) || assertion.equals < 0)) issues.push({ path: `${path}/assert/equals`, code: "invalid-row-count", message: "must be a non-negative integer" });
+  if (type === "state" && assertion.equals !== "observed" && assertion.equals !== "unknown") issues.push({ path: `${path}/assert/equals`, code: "invalid-state", message: "must be observed or unknown" });
   if (id === undefined || page === undefined || target === undefined || typeof type !== "string" || !assertionTypes.has(type as AssertionType)) return undefined;
   return {
     id,
@@ -165,18 +180,54 @@ export function validateScenarioDocument(raw: unknown): ValidationResult<Scenari
     issues.push({ path: "/steps", code: "ready-requires-assertion", message: "a ready Scenario needs at least one assertion" });
   }
   if (issues.length > 0 || id === undefined || intent === undefined || startPage === undefined || (raw.status !== "draft" && raw.status !== "ready")) return { ok: false, issues };
-  return { ok: true, value: { schema_version: schemaVersion, id, status: raw.status, intent, start_page: startPage, steps } };
+  const inputs = raw.inputs === undefined ? undefined : raw.inputs as NonNullable<ScenarioDocument["inputs"]>;
+  return { ok: true, value: { schema_version: schemaVersion, id, status: raw.status, intent, start_page: startPage, ...(inputs === undefined ? {} : { inputs }), steps } };
 }
 
 export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelDocument> {
   const issues: ValidationIssue[] = [];
   if (!isRecord(raw)) return { ok: false, issues: [{ path: "/", code: "invalid-type", message: "must be an object" }] };
+  hasOnlyKeys(raw, ["schema_version", "page", "revision", "elements"], "", issues);
   if (raw.schema_version !== schemaVersion) issues.push({ path: "/schema_version", code: "unsupported-version", message: `must equal ${schemaVersion}` });
   if (!isRecord(raw.page) || !isRecord(raw.page.identity)) {
     issues.push({ path: "/page", code: "invalid-page", message: "must include page identity" });
   }
+  if (isRecord(raw.page)) {
+    hasOnlyKeys(raw.page, ["id", "name", "identity"], "/page", issues);
+    if (typeof raw.page.id !== "string" || !safeId.test(raw.page.id)) issues.push({ path: "/page/id", code: "invalid-id", message: "must use lowercase kebab-case" });
+    if (typeof raw.page.name !== "string" || raw.page.name.length === 0) issues.push({ path: "/page/name", code: "required-string", message: "must be a non-empty string" });
+    if (isRecord(raw.page.identity)) {
+      hasOnlyKeys(raw.page.identity, ["landmarks"], "/page/identity", issues);
+      const landmarks = raw.page.identity.landmarks;
+      if (!Array.isArray(landmarks) || landmarks.length === 0) issues.push({ path: "/page/identity/landmarks", code: "invalid-landmarks", message: "must be a non-empty array" });
+      else landmarks.forEach((landmark, index) => {
+        if (!isRecord(landmark) || typeof landmark.role !== "string" || !["heading", "main", "navigation", "banner", "contentinfo", "form", "region"].includes(landmark.role) || typeof landmark.name !== "string" || landmark.name.trim().length === 0) {
+          issues.push({ path: `/page/identity/landmarks/${index}`, code: "invalid-landmark", message: "must define a supported role and non-empty name" });
+        } else hasOnlyKeys(landmark, ["role", "name"], `/page/identity/landmarks/${index}`, issues);
+      });
+    }
+  }
   if (typeof raw.revision !== "string" || raw.revision.length === 0) issues.push({ path: "/revision", code: "required-string", message: "must be a non-empty string" });
   if (!isRecord(raw.elements)) issues.push({ path: "/elements", code: "invalid-elements", message: "must be an object" });
+  else for (const [id, element] of Object.entries(raw.elements)) {
+    if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string" || (element.inputType !== undefined && typeof element.inputType !== "string") || (element.autocomplete !== undefined && typeof element.autocomplete !== "string")) issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
+    else {
+      hasOnlyKeys(element, ["state", "role", "name", "inputType", "autocomplete", "inputConstraints", "targetAliases"], `/elements/${id}`, issues);
+      if (element.targetAliases !== undefined && (!Array.isArray(element.targetAliases) || element.targetAliases.some((alias) => typeof alias !== "string" || alias.length === 0))) issues.push({ path: `/elements/${id}/targetAliases`, code: "invalid-target-aliases", message: "must be an array of non-empty strings" });
+      if (element.inputConstraints !== undefined) {
+        const constraints = element.inputConstraints;
+        if (!isRecord(constraints)) issues.push({ path: `/elements/${id}/inputConstraints`, code: "invalid-input-constraints", message: "must be an object" });
+        else {
+          hasOnlyKeys(constraints, ["required", "minLength", "maxLength", "pattern"], `/elements/${id}/inputConstraints`, issues);
+          if (constraints.required !== undefined && typeof constraints.required !== "boolean") issues.push({ path: `/elements/${id}/inputConstraints/required`, code: "invalid-input-constraint", message: "must be a boolean" });
+          for (const key of ["minLength", "maxLength"] as const) if (constraints[key] !== undefined && (!Number.isSafeInteger(constraints[key]) || Number(constraints[key]) < 0)) issues.push({ path: `/elements/${id}/inputConstraints/${key}`, code: "invalid-input-constraint", message: "must be a non-negative integer" });
+          if (typeof constraints.pattern === "string") { try { new RegExp(constraints.pattern); } catch { issues.push({ path: `/elements/${id}/inputConstraints/pattern`, code: "invalid-input-constraint", message: "must be a valid pattern" }); } }
+          else if (constraints.pattern !== undefined) issues.push({ path: `/elements/${id}/inputConstraints/pattern`, code: "invalid-input-constraint", message: "must be a string" });
+          if (typeof constraints.minLength === "number" && typeof constraints.maxLength === "number" && constraints.minLength > constraints.maxLength) issues.push({ path: `/elements/${id}/inputConstraints`, code: "invalid-input-constraints", message: "minLength cannot exceed maxLength" });
+        }
+      }
+    }
+  }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: raw as unknown as UiModelDocument };
 }

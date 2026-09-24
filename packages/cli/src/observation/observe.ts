@@ -6,6 +6,10 @@ export interface ObservationElement {
   readonly id: string;
   readonly role: string;
   readonly name: string;
+  readonly inputType?: string;
+  readonly autocomplete?: string;
+  readonly inputConstraints?: import("../contracts/types.js").InputConstraints;
+  readonly targetAliases?: readonly string[];
   readonly visible: boolean;
   readonly enabled: boolean;
   readonly locatorCandidates: readonly string[];
@@ -76,6 +80,10 @@ export async function observePage(page: Page, options: ObserveOptions = {}): Pro
           const labels = labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent?.trim() ?? "").filter(Boolean);
           if (labels.length > 0) return labels.join(" ");
         }
+        if ("labels" in element) {
+          const labels = Array.from((element as HTMLInputElement).labels ?? []).map((label) => label.innerText.trim()).filter(Boolean);
+          if (labels.length > 0) return labels.join(" ");
+        }
         return element.getAttribute("aria-label") ?? element.getAttribute("title") ?? element.innerText.trim() ?? "";
       };
       const candidates = (element: HTMLElement): string[] => {
@@ -98,6 +106,19 @@ export async function observePage(page: Page, options: ObserveOptions = {}): Pro
             id: `observed-${index + 1}`,
             role: inferRole(element),
             name: nameFor(element),
+            ...(element.tagName === "INPUT" ? { inputType: (element as HTMLInputElement).type.toLowerCase() } : element.tagName === "TEXTAREA" ? { inputType: "textarea" } : element.tagName === "SELECT" ? { inputType: "select" } : {}),
+            ...(element.matches("input,textarea,select") && element.hasAttribute("autocomplete") ? { autocomplete: element.getAttribute("autocomplete")! } : {}),
+            ...(element.matches("input,textarea,select") ? { targetAliases: [element.getAttribute("data-flowui-target"), element.id, element.getAttribute("name"), element.getAttribute("data-testid"), element.getAttribute("aria-label"), (element as HTMLInputElement).labels ? Array.from((element as HTMLInputElement).labels ?? []).map((label) => label.innerText.trim()).join(" ") : null].filter((value): value is string => Boolean(value)) } : {}),
+            ...(element.matches("input,textarea,select") ? (() => {
+              const control = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+              const constraints = {
+                ...(control.required ? { required: true } : {}),
+                ...("minLength" in control && control.minLength >= 0 ? { minLength: control.minLength } : {}),
+                ...("maxLength" in control && control.maxLength >= 0 ? { maxLength: control.maxLength } : {}),
+                ...(control.getAttribute("pattern") ? { pattern: control.getAttribute("pattern")! } : {}),
+              };
+              return Object.keys(constraints).length ? { inputConstraints: constraints } : {};
+            })() : {}),
             visible: isVisible(element),
             enabled: !control.disabled && element.getAttribute("aria-disabled") !== "true",
             locatorCandidates: candidates(element),

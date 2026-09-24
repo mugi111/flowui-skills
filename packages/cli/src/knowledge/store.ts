@@ -1,10 +1,16 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 
 import type { UiModelDocument } from "../contracts/types.js";
 
 const modelIdPattern = /^[a-z][a-z0-9-]*$/;
+const lockWaitMs = 2_000;
+
+export class StoreBusyError extends Error {
+  readonly code = "STORE_BUSY";
+  constructor(path: string) { super(`STORE_BUSY: ${path}`); }
+}
 
 export interface ModelConflict {
   readonly kind: "conflict";
@@ -19,6 +25,7 @@ export interface ModelStored {
 }
 
 export type StoreModelResult = ModelStored | ModelConflict;
+export type StoreWriteMode = { readonly mode: "create" } | { readonly mode: "update"; readonly expectedRevision: string };
 
 export interface ModelDiff {
   readonly pageIdentityChanged: boolean;
@@ -62,13 +69,14 @@ export async function readUiModel(projectDirectory: string, pageId: string): Pro
 export async function storeUiModel(
   projectDirectory: string,
   model: Omit<UiModelDocument, "revision">,
-  expectedRevision?: string,
+  writeMode: StoreWriteMode = { mode: "create" },
 ): Promise<StoreModelResult> {
   const path = modelPath(projectDirectory, model.page.id);
+  return withWriteLock(path, async () => {
   const current = await readUiModel(projectDirectory, model.page.id);
   const actualRevision = current?.revision;
-  if (expectedRevision !== undefined && expectedRevision !== actualRevision) {
-    return { kind: "conflict", expectedRevision, actualRevision };
+  if ((writeMode.mode === "create" && current !== undefined) || (writeMode.mode === "update" && writeMode.expectedRevision !== actualRevision)) {
+    return { kind: "conflict", expectedRevision: writeMode.mode === "create" ? "<new>" : writeMode.expectedRevision, actualRevision };
   }
 
   const documentWithoutRevision = { ...model };
@@ -76,9 +84,45 @@ export async function storeUiModel(
   const document: UiModelDocument = { ...documentWithoutRevision, revision };
   await mkdir(dirname(path), { recursive: true });
   const temporaryPath = join(dirname(path), `.${model.page.id}.${process.pid}.${crypto.randomUUID()}.tmp`);
-  await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporaryPath, path);
+  try {
+    await writeFile(temporaryPath, `${JSON.stringify(document, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporaryPath, path);
+  } finally {
+    try { await unlink(temporaryPath); } catch (error) { if (!isNotFoundError(error)) throw error; }
+  }
   return { kind: "stored", revision, path };
+  });
+}
+
+async function withWriteLock<T>(path: string, operation: () => Promise<T>): Promise<T> {
+  const lockPath = `${path}.lock`;
+  const token = crypto.randomUUID();
+  const deadline = Date.now() + lockWaitMs;
+  await mkdir(dirname(path), { recursive: true });
+  let lock;
+  let ownerStat: Awaited<ReturnType<typeof lstat>> | undefined;
+  while (!lock) {
+    try {
+      lock = await open(lockPath, "wx", 0o600);
+      try {
+        await lock.writeFile(`${JSON.stringify({ pid: process.pid, token, createdAt: new Date().toISOString() })}\n`);
+        ownerStat = await lock.stat();
+      }
+      catch (error) { await lock.close(); await unlink(lockPath); throw error; }
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) throw error;
+      if (Date.now() >= deadline) throw new StoreBusyError(path);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  try { return await operation(); }
+  finally {
+    await lock.close();
+    try {
+      const current = await lstat(lockPath);
+      if (ownerStat && current.dev === ownerStat.dev && current.ino === ownerStat.ino) await unlink(lockPath);
+    } catch (error) { if (!isNotFoundError(error)) throw error; }
+  }
 }
 
 export function diffUiModels(before: UiModelDocument, after: UiModelDocument): ModelDiff {
@@ -100,4 +144,8 @@ export function diffUiModels(before: UiModelDocument, after: UiModelDocument): M
 
 function isNotFoundError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+function isAlreadyExistsError(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error && (error as NodeJS.ErrnoException).code === "EEXIST";
 }
