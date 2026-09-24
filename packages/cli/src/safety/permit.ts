@@ -14,7 +14,16 @@ export function createPermit(scenario: ScenarioDocument, models: Readonly<Record
   if (steps.length !== chosen.size) throw new Error("permit references an unknown or non-action Step");
   for (const step of steps) if (!models[step.page]?.elements[step.target]) throw new Error(`permit target is absent from the Model: ${step.target}`);
   const modelHash = contentHash(Object.fromEntries(Object.entries(models).sort(([a], [b]) => a.localeCompare(b))));
-  const actionBindings = Object.fromEntries(steps.map((step) => [step.id, contentHash({ targetId: step.target, targetScope: step.target, inputConstraints: null })]));
+  const actionBindings = Object.fromEntries(steps.map((step) => {
+    let navigationDestination: string | null = null;
+    if (step.action === "navigate") {
+      if (typeof step.value !== "string") throw new Error("Permit creation requires a literal destination for navigation");
+      const destination = new URL(step.value, origin.origin);
+      if (destination.origin !== origin.origin || destination.username || destination.password) throw new Error("navigation Permit cannot leave its bound origin");
+      navigationDestination = destination.toString();
+    }
+    return [step.id, contentHash({ targetId: step.target, targetScope: step.target, inputConstraints: models[step.page]!.elements[step.target]!.inputConstraints ?? null, navigationDestination })];
+  }));
   return {
     scenarioHash: contentHash(scenario), modelHash, environment: options.environment, origin: origin.origin,
     actionIds: steps.map((step) => step.id), targetScopes: steps.map((step) => step.target), actionBindings, expiresAt: options.expiresAt,

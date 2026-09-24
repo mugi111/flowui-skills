@@ -4,6 +4,7 @@ import { RecordCollector } from "./collector.js";
 
 export interface BrowserRecordOptions extends RedactionPolicy {
   readonly secretReferences?: Readonly<Record<string, string>>;
+  readonly targetAliases?: Readonly<Record<string, string>>;
 }
 
 /** Installs page-side redaction so raw sensitive values are never passed to the host binding. */
@@ -12,18 +13,19 @@ export async function subscribeBrowserRecord(context: BrowserContext, collector:
   const documentId = crypto.randomUUID();
   const configuredKeys = [...(options.sensitiveKeys ?? []), ...(options.sensitiveFields ?? [])].map((key) => key.toLowerCase());
   const secretReferences = options.secretReferences ?? {};
+  const targetAliases = options.targetAliases ?? {};
   const disposeBinding = await context.exposeBinding(bindingName, (_source, raw: unknown) => {
     if (!raw || typeof raw !== "object") { collector.add(raw as never); return; }
     collector.add(raw as never);
   });
-  const installer = ({ binding, configuredKeys, secretReferences, documentId }: { binding: string; configuredKeys: string[]; secretReferences: Record<string, string>; documentId: string }) => {
+  const installer = ({ binding, configuredKeys, secretReferences, targetAliases, documentId }: { binding: string; configuredKeys: string[]; secretReferences: Record<string, string>; targetAliases: Record<string, string>; documentId: string }) => {
     const bindingFunction = (window as unknown as Record<string, (event: unknown) => Promise<void>>)[binding];
     if (typeof bindingFunction !== "function") return;
     const lower = (value: string) => value.trim().toLowerCase();
-    const isSensitive = (field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, label: string) => {
+    const isSensitive = (field: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, label: string, targetId: string) => {
       const auto = lower(field.getAttribute("autocomplete") ?? "");
       if ((field instanceof HTMLInputElement && field.type.toLowerCase() === "password") || /password|one-time-code|cc-|credit-card|transaction-/i.test(auto)) return true;
-      const keys = [field.id, (field as HTMLInputElement).name ?? "", label];
+      const keys = [targetId, field.id, (field as HTMLInputElement).name ?? "", label];
       return keys.some((key) => /password|passphrase|secret|token|api[_-]?key/i.test(key) || configuredKeys.includes(lower(key)));
     };
     const labelOf = (field: Element) => {
@@ -35,13 +37,17 @@ export async function subscribeBrowserRecord(context: BrowserContext, collector:
     const onInput = (event: Event) => {
       const field = event.target;
       if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement || field instanceof HTMLSelectElement)) return;
-      const target = targetOf(field);
+      const rawTarget = targetOf(field);
       const label = labelOf(field);
+      const aliases = [rawTarget, field.id, (field as HTMLInputElement).name ?? "", field.getAttribute("data-testid") ?? "", field.getAttribute("aria-label") ?? "", label].filter(Boolean);
+      const resolvedTargets = [...new Set(aliases.map((alias) => targetAliases[alias]).filter((targetId): targetId is string => Boolean(targetId)))];
+      const logicalTarget = field.getAttribute("data-flowui-target") || (resolvedTargets.length === 1 ? resolvedTargets[0] : undefined);
+      const target = logicalTarget ?? rawTarget;
       const inputType = field instanceof HTMLInputElement ? field.type.toLowerCase() : field instanceof HTMLTextAreaElement ? "textarea" : "select";
       const value = field.value;
       const masked = /^\s*[•●*xX]{3,}\s*$/.test(value);
-      const secretRef = secretReferences[target] ?? secretReferences[field.name] ?? secretReferences[field.id];
-      const sensitive = isSensitive(field, label) || Boolean(secretRef);
+      const secretRef = secretReferences[target] ?? secretReferences[rawTarget] ?? secretReferences[field.name] ?? secretReferences[field.id];
+      const sensitive = isSensitive(field, label, target) || Boolean(secretRef);
       const knownType = ["text", "search", "email", "tel", "url", "number", "checkbox", "radio", "date", "datetime-local", "month", "week", "time", "color", "range", "textarea", "select"].includes(inputType);
       const knownTarget = Boolean(target || field.getAttribute("name") || label);
       const valueRecord = masked ? { kind: "redacted" } : sensitive ? secretRef ? { kind: "secret", ref: secretRef } : { kind: "redacted" } : knownType && knownTarget ? { kind: "literal", value } : { kind: "redacted" };
@@ -62,7 +68,7 @@ export async function subscribeBrowserRecord(context: BrowserContext, collector:
       document.removeEventListener("click", onClick, true);
     };
   };
-  const installerOptions = { binding: bindingName, configuredKeys, secretReferences: { ...secretReferences }, documentId };
+  const installerOptions = { binding: bindingName, configuredKeys, secretReferences: { ...secretReferences }, targetAliases: { ...targetAliases }, documentId };
   const disposeScript = await context.addInitScript(installer, installerOptions);
   await Promise.all(context.pages().map((page) => page.evaluate(installer, installerOptions)));
   const navigations = new Map<Page, (frame: Frame) => void>();

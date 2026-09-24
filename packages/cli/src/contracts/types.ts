@@ -70,7 +70,14 @@ export interface UiModelDocument {
     };
   };
   readonly revision: string;
-  readonly elements: Readonly<Record<string, { readonly state: KnowledgeState; readonly role: string; readonly name: string; readonly inputType?: string; readonly autocomplete?: string }>>;
+  readonly elements: Readonly<Record<string, { readonly state: KnowledgeState; readonly role: string; readonly name: string; readonly inputType?: string; readonly autocomplete?: string; readonly inputConstraints?: InputConstraints; readonly targetAliases?: readonly string[] }>>;
+}
+
+export interface InputConstraints {
+  readonly required?: boolean;
+  readonly minLength?: number;
+  readonly maxLength?: number;
+  readonly pattern?: string;
 }
 
 export interface ValidationIssue {

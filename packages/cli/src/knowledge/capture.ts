@@ -35,10 +35,10 @@ export function createCaptureCandidate(observation: PageObservation, definitions
   const pageIdentity = identifyPage(observation, definitions);
   if (pageIdentity.kind !== "identified") return { pageIdentity, requiresAcceptance: true };
 
-  const elements: Record<string, { state: "observed"; role: string; name: string; inputType?: string; autocomplete?: string }> = {};
+  const elements: Record<string, { state: "observed"; role: string; name: string; inputType?: string; autocomplete?: string; inputConstraints?: import("../contracts/types.js").InputConstraints; targetAliases?: readonly string[] }> = {};
   for (const [index, element] of observation.elements.entries()) {
     const key = logicalElementId(element.role, element.name, index);
-    elements[key] = { state: "observed", role: element.role, name: element.name, ...(element.inputType === undefined ? {} : { inputType: element.inputType }), ...(element.autocomplete === undefined ? {} : { autocomplete: element.autocomplete }) };
+    elements[key] = { state: "observed", role: element.role, name: element.name, ...(element.inputType === undefined ? {} : { inputType: element.inputType }), ...(element.autocomplete === undefined ? {} : { autocomplete: element.autocomplete }), ...(element.inputConstraints === undefined ? {} : { inputConstraints: element.inputConstraints }), ...(element.targetAliases === undefined ? {} : { targetAliases: element.targetAliases }) };
   }
   return {
     pageIdentity,

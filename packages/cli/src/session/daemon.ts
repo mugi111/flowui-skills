@@ -1,7 +1,7 @@
 import { createServer, connect, type Socket } from "node:net";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { createPlaywrightExecutionDriver } from "../scenario/playwright-driver.j
 import { RecordCollector } from "../record/collector.js";
 import { subscribeBrowserRecord } from "../record/browser.js";
 import { loadDocument } from "../contracts/document.js";
+import { validateUiModelDocument } from "../contracts/validation.js";
 import type { RedactionPolicy } from "../shared/redaction.js";
 import { BrowserSession } from "./session.js";
 
@@ -34,7 +35,28 @@ async function projectSafetyConfig(): Promise<ProjectSafetyConfig> {
   if (Object.keys(value).some((key) => !["sensitive_fields", "secret_references"].includes(key))) throw new Error("unknown .flowui/config.json setting");
   if (value.sensitive_fields !== undefined && (!Array.isArray(value.sensitive_fields) || value.sensitive_fields.some((key) => typeof key !== "string"))) throw new Error("invalid sensitive_fields setting");
   if (value.secret_references !== undefined && (!value.secret_references || typeof value.secret_references !== "object" || Array.isArray(value.secret_references) || Object.values(value.secret_references).some((reference) => typeof reference !== "string" || !/^(env|vault|keychain):[A-Za-z0-9_.:/-]+$/.test(reference)))) throw new Error("invalid secret_references setting");
-  return { ...(value.sensitive_fields === undefined ? {} : { sensitiveFields: value.sensitive_fields as string[] }), secretReferences: (value.secret_references ?? {}) as Record<string, string> };
+  const secretReferences = (value.secret_references ?? {}) as Record<string, string>;
+  const sensitiveFields = [...(value.sensitive_fields as string[] | undefined ?? []), ...Object.keys(secretReferences)];
+  return { ...(sensitiveFields.length === 0 ? {} : { sensitiveFields }), secretReferences };
+}
+
+async function projectTargetAliases(): Promise<Readonly<Record<string, string>>> {
+  const directory = join(process.cwd(), ".flowui", "ui-model");
+  let files: string[];
+  try { files = await readdir(directory); }
+  catch (error) { if (error instanceof Error && "code" in error && error.code === "ENOENT") return {}; throw new Error("unable to read UI Models"); }
+  const aliases = new Map<string, Set<string>>();
+  for (const file of files.filter((name) => name.endsWith(".json"))) {
+    let raw: unknown;
+    try { raw = await loadDocument(join(directory, file)); } catch { continue; }
+    const result = validateUiModelDocument(raw);
+    if (!result.ok) continue;
+    for (const [targetId, element] of Object.entries(result.value.elements)) for (const alias of element.targetAliases ?? []) {
+      const targets = aliases.get(alias) ?? new Set<string>();
+      targets.add(targetId); aliases.set(alias, targets);
+    }
+  }
+  return Object.fromEntries([...aliases].filter(([, targets]) => targets.size === 1).map(([alias, targets]) => [alias, [...targets][0]!]));
 }
 
 export function sessionSocketPath(projectDirectory: string): string {
@@ -119,37 +141,43 @@ export async function runSessionDaemon(socketPath: string): Promise<void> {
         session ??= await BrowserSession.start(new PlaywrightBrowserLauncher());
         return { ok: true, result: session.snapshot() };
       }
-      if (!session) return { ok: false, error: "SESSION_NOT_FOUND" };
-      if (request.method === "status") return { ok: true, result: session.snapshot() };
-      if (request.method === "close") { stopRecordObserver?.(); stopRecordObserver = undefined; collector?.stop(); collector = undefined; await session.close(); session = undefined; return { ok: true, result: { closed: true } }; }
+      const activeSession = session;
+      if (!activeSession) return { ok: false, error: "SESSION_NOT_FOUND" };
+      if (request.method === "status") return { ok: true, result: activeSession.snapshot() };
+      if (request.method === "close") { stopRecordObserver?.(); stopRecordObserver = undefined; collector?.stop(); collector = undefined; await activeSession.close(); session = undefined; return { ok: true, result: { closed: true } }; }
       if (request.method === "record-start") {
         if (collector) return { ok: false, error: "RECORDING_ALREADY_ACTIVE" };
-        if (!session.browserContext) return { ok: false, error: "BROWSER_CONTEXT_UNAVAILABLE" };
+        if (activeSession.snapshot().state === "executing") return { ok: false, error: "SCENARIO_EXECUTING" };
+        if (!activeSession.browserContext) return { ok: false, error: "BROWSER_CONTEXT_UNAVAILABLE" };
         const config = await projectSafetyConfig();
+        const targetAliases = await projectTargetAliases();
         collector = new RecordCollector(config);
-        stopRecordObserver = await subscribeBrowserRecord(session.browserContext, collector, config);
+        try { stopRecordObserver = await subscribeBrowserRecord(activeSession.browserContext, collector, { ...config, targetAliases }); }
+        catch (error) { collector = undefined; throw error; }
+        activeSession.transition("recording");
         return { ok: true, result: { recording: true } };
       }
       if (request.method === "record-stop") {
         if (!collector) return { ok: false, error: "RECORDING_NOT_ACTIVE" };
         stopRecordObserver?.(); stopRecordObserver = undefined;
         const events = collector.stop(); collector = undefined;
+        activeSession.transition("idle");
         return { ok: true, result: events };
       }
       if (request.method === "capture") {
-        const snapshot = session.snapshot();
+        const snapshot = activeSession.snapshot();
         const tabs = snapshot.tabIds;
         if (!request.tabId && tabs.length !== 1) return { ok: false, error: "TAB_ID_REQUIRED" };
         const tabId = request.tabId ?? tabs[0];
         if (!tabId) return { ok: false, error: "TAB_NOT_FOUND" };
-        return await session.withTabLock(tabId, async (tab) => tab.page ? { ok: true, result: await observePage(tab.page) } : { ok: false, error: "TAB_UNAVAILABLE" });
+        return await activeSession.withTabLock(tabId, async (tab) => tab.page ? { ok: true, result: await observePage(tab.page) } : { ok: false, error: "TAB_UNAVAILABLE" });
       }
-      const snapshot = session.snapshot();
+      const snapshot = activeSession.snapshot();
       const tabs = snapshot.tabIds;
       if (!request.tabId && tabs.length !== 1) return { ok: false, error: "TAB_ID_REQUIRED" };
       const tabId = request.tabId ?? tabs[0];
       if (!tabId) return { ok: false, error: "TAB_NOT_FOUND" };
-      return await session.withTabLock(tabId, async (tab) => {
+      return await activeSession.withTabLock(tabId, async (tab) => {
         if (!tab.page) return { ok: false, error: "TAB_UNAVAILABLE" };
         if (request.method === "inspect") return { ok: true, result: await observePage(tab.page) };
         if (request.method === "resolve-target") {
@@ -162,8 +190,12 @@ export async function runSessionDaemon(socketPath: string): Promise<void> {
         if (!request.scenario || !request.models || !request.environment) return { ok: false, error: "INVALID_RUN_REQUEST" };
         const models = structuredClone(request.models) as Readonly<Record<string, UiModelDocument>>;
         const config = await projectSafetyConfig();
-        const result = await executeScenario({ scenario: request.scenario, models, environment: request.environment, driver: createPlaywrightExecutionDriver(tab.page, models), redactionPolicy: config, ...(request.inputs === undefined ? {} : { inputs: request.inputs }), ...(request.secrets === undefined ? {} : { secrets: request.secrets }), ...(request.permit === undefined ? {} : { permit: request.permit }), ...(request.testMode === undefined ? {} : { testMode: request.testMode }), ...(request.pauseBefore === undefined ? {} : { pauseBefore: request.pauseBefore }) });
-        return { ok: true, result };
+        if (activeSession.snapshot().state === "recording") return { ok: false, error: "RECORDING_ACTIVE" };
+        activeSession.transition("executing");
+        try {
+          const result = await executeScenario({ scenario: request.scenario, models, environment: request.environment, driver: createPlaywrightExecutionDriver(tab.page, models), redactionPolicy: config, ...(request.inputs === undefined ? {} : { inputs: request.inputs }), ...(request.secrets === undefined ? {} : { secrets: request.secrets }), ...(request.permit === undefined ? {} : { permit: request.permit }), ...(request.testMode === undefined ? {} : { testMode: request.testMode }), ...(request.pauseBefore === undefined ? {} : { pauseBefore: request.pauseBefore }) });
+          return { ok: true, result };
+        } finally { if (activeSession.snapshot().state === "executing") activeSession.transition("idle"); }
       });
     } catch (error) { return { ok: false, error: error instanceof Error ? error.message : "SESSION_SERVICE_ERROR" }; }
   };

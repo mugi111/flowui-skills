@@ -16,7 +16,6 @@ function driver(overrides: Partial<ExecutionDriver> = {}, sent: string[] = []): 
     acquireTabLock: async () => () => undefined,
     inspectPage: async () => ({ pageId: "profile", origin: "https://example.test", state: "ready" }),
     resolveTarget: async (_page, id) => [{ id, scope: id }],
-    classifyAction: async (step, target) => ({ id: step.id, risk: "mutation", targetScope: target.scope }),
     sendAction: async (step) => { sent.push(step.id); },
     observeAction: async () => true,
     evaluateAssertion: async () => true,
@@ -51,9 +50,19 @@ test("does not act on an ambiguous Target", async () => {
   assert.deepEqual(sent, []);
 });
 
-test("does not act when action classification is unknown", async () => {
+test("does not send input outside Model constraints", async () => {
   const sent: string[] = [];
-  const result = await executeScenario({ scenario, models, inputs: { name: "Ada" }, environment: "test", driver: driver({ classifyAction: async () => ({ id: "fill", risk: "unknown", targetScope: "name-field" }) }, sent) });
+  const result = await executeScenario({ scenario, models, inputs: { name: "Ada" }, environment: "test", driver: driver({ resolveTarget: async (_page, id) => [{ id, scope: id, inputConstraints: { required: true, maxLength: 2 } }] }, sent) });
+  assert.equal(result.status, "blocked");
+  assert.deepEqual(sent, []);
+});
+
+test("does not send navigation to a different origin even with a Permit", async () => {
+  const sent: string[] = [];
+  const safeNavigation = { ...scenario, steps: [{ id: "go", page: "profile", action: "navigate", target: "name-field", value: "https://example.test/safe" }] } as unknown as ScenarioDocument;
+  const unsafeNavigation = { ...safeNavigation, steps: [{ id: "go", page: "profile", action: "navigate", target: "name-field", value: "https://outside.test/" }] };
+  const permit = createPermit(safeNavigation, models, { origin: "https://example.test", environment: "test", expiresAt: "2099-01-01T00:00:00Z", stepIds: ["go"] });
+  const result = await executeScenario({ scenario: unsafeNavigation, models, inputs: { name: "Ada" }, permit, environment: "test", driver: driver({}, sent) });
   assert.equal(result.status, "blocked");
   assert.deepEqual(sent, []);
 });

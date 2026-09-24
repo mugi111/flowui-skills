@@ -145,6 +145,9 @@ function validateStep(rawStep: unknown, index: number, sensitiveInputs: Readonly
   }
   hasOnlyKeys(expectation, ["source", "reference"], `${path}/expectation`, issues);
   if (assertion.equals !== undefined && !["string", "number", "boolean"].includes(typeof assertion.equals)) issues.push({ path: `${path}/assert/equals`, code: "invalid-equals", message: "must be a string, number, or boolean" });
+  if (["text", "value", "url", "row-count", "state"].includes(String(type)) && assertion.equals === undefined) issues.push({ path: `${path}/assert/equals`, code: "required-equals", message: "this assertion requires an expected value" });
+  if (type === "row-count" && (typeof assertion.equals !== "number" || !Number.isSafeInteger(assertion.equals) || assertion.equals < 0)) issues.push({ path: `${path}/assert/equals`, code: "invalid-row-count", message: "must be a non-negative integer" });
+  if (type === "state" && assertion.equals !== "observed" && assertion.equals !== "unknown") issues.push({ path: `${path}/assert/equals`, code: "invalid-state", message: "must be observed or unknown" });
   if (id === undefined || page === undefined || target === undefined || typeof type !== "string" || !assertionTypes.has(type as AssertionType)) return undefined;
   return {
     id,
@@ -208,7 +211,22 @@ export function validateUiModelDocument(raw: unknown): ValidationResult<UiModelD
   if (!isRecord(raw.elements)) issues.push({ path: "/elements", code: "invalid-elements", message: "must be an object" });
   else for (const [id, element] of Object.entries(raw.elements)) {
     if (!safeId.test(id) || !isRecord(element) || (element.state !== "observed" && element.state !== "unknown") || typeof element.role !== "string" || typeof element.name !== "string" || (element.inputType !== undefined && typeof element.inputType !== "string") || (element.autocomplete !== undefined && typeof element.autocomplete !== "string")) issues.push({ path: `/elements/${id}`, code: "invalid-element", message: "must define state, role, and name" });
-    else hasOnlyKeys(element, ["state", "role", "name", "inputType", "autocomplete"], `/elements/${id}`, issues);
+    else {
+      hasOnlyKeys(element, ["state", "role", "name", "inputType", "autocomplete", "inputConstraints", "targetAliases"], `/elements/${id}`, issues);
+      if (element.targetAliases !== undefined && (!Array.isArray(element.targetAliases) || element.targetAliases.some((alias) => typeof alias !== "string" || alias.length === 0))) issues.push({ path: `/elements/${id}/targetAliases`, code: "invalid-target-aliases", message: "must be an array of non-empty strings" });
+      if (element.inputConstraints !== undefined) {
+        const constraints = element.inputConstraints;
+        if (!isRecord(constraints)) issues.push({ path: `/elements/${id}/inputConstraints`, code: "invalid-input-constraints", message: "must be an object" });
+        else {
+          hasOnlyKeys(constraints, ["required", "minLength", "maxLength", "pattern"], `/elements/${id}/inputConstraints`, issues);
+          if (constraints.required !== undefined && typeof constraints.required !== "boolean") issues.push({ path: `/elements/${id}/inputConstraints/required`, code: "invalid-input-constraint", message: "must be a boolean" });
+          for (const key of ["minLength", "maxLength"] as const) if (constraints[key] !== undefined && (!Number.isSafeInteger(constraints[key]) || Number(constraints[key]) < 0)) issues.push({ path: `/elements/${id}/inputConstraints/${key}`, code: "invalid-input-constraint", message: "must be a non-negative integer" });
+          if (typeof constraints.pattern === "string") { try { new RegExp(constraints.pattern); } catch { issues.push({ path: `/elements/${id}/inputConstraints/pattern`, code: "invalid-input-constraint", message: "must be a valid pattern" }); } }
+          else if (constraints.pattern !== undefined) issues.push({ path: `/elements/${id}/inputConstraints/pattern`, code: "invalid-input-constraint", message: "must be a string" });
+          if (typeof constraints.minLength === "number" && typeof constraints.maxLength === "number" && constraints.minLength > constraints.maxLength) issues.push({ path: `/elements/${id}/inputConstraints`, code: "invalid-input-constraints", message: "minLength cannot exceed maxLength" });
+        }
+      }
+    }
   }
   if (issues.length > 0) return { ok: false, issues };
   return { ok: true, value: raw as unknown as UiModelDocument };
