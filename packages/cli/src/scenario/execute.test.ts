@@ -36,6 +36,16 @@ test("rejects ordinary values for a sensitive Model target before acquiring a lo
   assert.equal(acquired, 0);
 });
 
+test("resolves sensitive declared inputs through secret references without requiring a public input", async () => {
+  const sensitiveScenario = {
+    ...scenario,
+    inputs: { password: { type: "string", sensitive: true } },
+    steps: [{ id: "fill-password", page: "profile", action: "fill", target: "name-field", value: { secret: "env:LOGIN_PASSWORD" } }],
+  };
+  const result = await executeScenario({ scenario: sensitiveScenario, models, secrets: { "env:LOGIN_PASSWORD": "private" }, environment: "test", driver: driver() });
+  assert.equal(result.status, "blocked");
+});
+
 test("does not send a mutation without a matching permit", async () => {
   const sent: string[] = [];
   const result = await executeScenario({ scenario, models, inputs: { name: "Ada" }, environment: "test", driver: driver({}, sent) });

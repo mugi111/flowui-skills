@@ -13,7 +13,10 @@ import { requestSession, runSessionDaemon } from "./session/daemon.js";
 import { createCaptureCandidate } from "./knowledge/capture.js";
 import { storeUiModel } from "./knowledge/store.js";
 import { createPermit } from "./safety/permit.js";
+import { resolveEnvironmentInputs } from "./scenario/environment-inputs.js";
+import { loadProjectSafetyConfig, resolveEnvironmentSecrets } from "./session/config.js";
 export { executeScenario } from "./scenario/execute.js";
+export { resolveEnvironmentInputs } from "./scenario/environment-inputs.js";
 export { RecordCollector } from "./record/collector.js";
 export { subscribeBrowserRecord } from "./record/browser.js";
 export { createPlaywrightExecutionDriver } from "./scenario/playwright-driver.js";
@@ -214,17 +217,10 @@ export async function runCommand(argv: readonly string[]): Promise<{ exitCode: n
       const references = validateScenarioAgainstModel({ ...scenario, start_page: page, steps: pageSteps }, model.value);
       if (!references.ok) return { exitCode: 2, output: JSON.stringify(references.issues) };
     }
-    const inputs: Record<string, string> = {};
-    for (const id of Object.keys(scenario.inputs ?? {})) {
-      const value = process.env[`FLOWUI_INPUT_${id.replace(/-/g, "_").toUpperCase()}`];
-      if (value !== undefined) inputs[id] = value;
-    }
-    const secrets: Record<string, string | undefined> = {};
-    for (const step of scenario.steps) if ("action" in step && step.value && typeof step.value === "object" && "secret" in step.value) {
-      const reference = step.value.secret;
-      const environmentKey = reference.startsWith("env:") ? reference.slice(4) : reference;
-      secrets[reference] = process.env[environmentKey];
-    }
+    const inputs = resolveEnvironmentInputs(scenario.inputs, (name) => process.env[name]);
+    const config = await loadProjectSafetyConfig(process.cwd());
+    const secretRefs = scenario.steps.flatMap((step) => "action" in step && step.value && typeof step.value === "object" && "secret" in step.value ? [step.value.secret] : []);
+    const secrets = resolveEnvironmentSecrets(secretRefs, config.secretReferences, (name) => process.env[name]);
     let permit: import("./safety/gate.js").Permit | undefined;
     const permitPath = options.get("--permit");
     if (permitPath) permit = await loadDocument(permitPath) as import("./safety/gate.js").Permit;

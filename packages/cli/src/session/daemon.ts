@@ -15,31 +15,11 @@ import { RecordCollector } from "../record/collector.js";
 import { subscribeBrowserRecord } from "../record/browser.js";
 import { loadDocument } from "../contracts/document.js";
 import { validateUiModelDocument } from "../contracts/validation.js";
-import type { RedactionPolicy } from "../shared/redaction.js";
+import { loadProjectSafetyConfig } from "./config.js";
 import { BrowserSession } from "./session.js";
 
 export interface SessionRequest { readonly method: "start" | "status" | "close" | "inspect" | "capture" | "resolve-target" | "run" | "record-start" | "record-stop"; readonly tabId?: string; readonly pageId?: string; readonly targetId?: string; readonly scenario?: unknown; readonly models?: Readonly<Record<string, UiModelDocument>>; readonly inputs?: Readonly<Record<string, unknown>>; readonly secrets?: Readonly<Record<string, string | undefined>>; readonly permit?: import("../safety/gate.js").Permit; readonly environment?: string; readonly testMode?: boolean; readonly pauseBefore?: string; }
 export interface SessionResponse { readonly ok: boolean; readonly result?: unknown; readonly error?: string; }
-interface ProjectSafetyConfig extends RedactionPolicy { readonly secretReferences: Readonly<Record<string, string>>; }
-
-async function projectSafetyConfig(): Promise<ProjectSafetyConfig> {
-  const configPath = join(process.cwd(), ".flowui", "config.json");
-  let raw: unknown;
-  try { raw = await loadDocument(configPath); }
-  catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return { secretReferences: {} };
-    throw new Error("invalid .flowui/config.json");
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("invalid .flowui/config.json");
-  const value = raw as Record<string, unknown>;
-  if (Object.keys(value).some((key) => !["sensitive_fields", "secret_references"].includes(key))) throw new Error("unknown .flowui/config.json setting");
-  if (value.sensitive_fields !== undefined && (!Array.isArray(value.sensitive_fields) || value.sensitive_fields.some((key) => typeof key !== "string"))) throw new Error("invalid sensitive_fields setting");
-  if (value.secret_references !== undefined && (!value.secret_references || typeof value.secret_references !== "object" || Array.isArray(value.secret_references) || Object.values(value.secret_references).some((reference) => typeof reference !== "string" || !/^(env|vault|keychain):[A-Za-z0-9_.:/-]+$/.test(reference)))) throw new Error("invalid secret_references setting");
-  const secretReferences = (value.secret_references ?? {}) as Record<string, string>;
-  const sensitiveFields = [...(value.sensitive_fields as string[] | undefined ?? []), ...Object.keys(secretReferences)];
-  return { ...(sensitiveFields.length === 0 ? {} : { sensitiveFields }), secretReferences };
-}
-
 async function projectTargetAliases(): Promise<Readonly<Record<string, string>>> {
   const directory = join(process.cwd(), ".flowui", "ui-model");
   let files: string[];
@@ -149,7 +129,7 @@ export async function runSessionDaemon(socketPath: string): Promise<void> {
         if (collector) return { ok: false, error: "RECORDING_ALREADY_ACTIVE" };
         if (activeSession.snapshot().state === "executing") return { ok: false, error: "SCENARIO_EXECUTING" };
         if (!activeSession.browserContext) return { ok: false, error: "BROWSER_CONTEXT_UNAVAILABLE" };
-        const config = await projectSafetyConfig();
+        const config = await loadProjectSafetyConfig(process.cwd());
         const targetAliases = await projectTargetAliases();
         collector = new RecordCollector(config);
         try { stopRecordObserver = await subscribeBrowserRecord(activeSession.browserContext, collector, { ...config, targetAliases }); }
@@ -189,7 +169,7 @@ export async function runSessionDaemon(socketPath: string): Promise<void> {
         }
         if (!request.scenario || !request.models || !request.environment) return { ok: false, error: "INVALID_RUN_REQUEST" };
         const models = structuredClone(request.models) as Readonly<Record<string, UiModelDocument>>;
-        const config = await projectSafetyConfig();
+        const config = await loadProjectSafetyConfig(process.cwd());
         if (activeSession.snapshot().state === "recording") return { ok: false, error: "RECORDING_ACTIVE" };
         activeSession.transition("executing");
         try {
