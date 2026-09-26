@@ -12,14 +12,13 @@ export function renderPlaywright(scenarioInput: ScenarioDocument, modelInputs: R
   }
   const scenario = JSON.stringify(scenarioResult.value, null, 2);
   const models = JSON.stringify(fixedModels, null, 2);
-  const inputs = Object.keys(scenarioResult.value.inputs ?? {}).map((id) => `${JSON.stringify(id)}: process.env[${JSON.stringify(`FLOWUI_INPUT_${id.replace(/-/g, "_").toUpperCase()}`)}]`).join(",\n    ");
   const secretRefs = scenarioResult.value.steps.flatMap((step) => "action" in step && step.value && typeof step.value === "object" && "secret" in step.value ? [step.value.secret] : []);
   const secrets = [...new Set(secretRefs)].map((reference) => {
     const key = reference.startsWith("env:") ? reference.slice(4) : reference;
     return `${JSON.stringify(reference)}: process.env[${JSON.stringify(key)}]`;
   }).join(",\n    ");
   return `import { test } from "@playwright/test";
-import { executeScenario, createPlaywrightExecutionDriver } from "@mugi111/flowui-skills";
+import { executeScenario, createPlaywrightExecutionDriver, resolveEnvironmentInputs } from "@mugi111/flowui-skills";
 
 const scenario = ${scenario} as const;
 const models = ${models} as const;
@@ -29,7 +28,7 @@ test(${JSON.stringify(scenarioResult.value.id)}, async ({ page }) => {
   const result = await executeScenario({
     scenario,
     models,
-    inputs: { ${inputs} },
+    inputs: resolveEnvironmentInputs(scenario.inputs, (name) => process.env[name]),
     secrets: { ${secrets} },
     permit,
     environment: process.env.FLOWUI_ENV ?? "test",

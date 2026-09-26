@@ -63,6 +63,7 @@ export async function executeScenario(request: ExecuteScenarioRequest): Promise<
   }
   const declaredInputs = scenario.inputs ?? {};
   for (const [id, definition] of Object.entries(declaredInputs)) {
+    if (definition.sensitive) continue;
     const value = request.inputs?.[id];
     if (value === undefined) throw new Error(`missing input: ${id}`);
     if (typeof value !== definition.type) throw new Error(`invalid input type: ${id}`);
